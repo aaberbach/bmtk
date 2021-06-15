@@ -75,25 +75,26 @@ class SpikesMod(SimulatorMod):
             pop_id = self._gid_map.get_pool_id(gid)
             for t in tVec:
                 self._spike_writer.add_spike(node_id=pop_id.node_id, timestamp=t, population=pop_id.population)
-
-        pc.barrier()  # wait until all ranks have been saved
+        print("LSKDJFLSKDJFLSKDJFLSKDJF", flush=True)
+        #pc.barrier()  # wait until all ranks have been saved
         sim.set_spikes_recording()  # reset recording vector
+        print("AFTER SET SPIKES", flush=True)
 
     def finalize(self, sim):
         # TODO: Get ride of flush/barrier calls, spike_trains should take care of it
         self._spike_writer.flush()
-        pc.barrier()
+        #pc.barrier()
 
         if self._save_csv:
             self._spike_writer.to_csv(self._csv_fname, sort_order=self._sort_order)
-            pc.barrier()
+            #pc.barrier()
 
         if self._save_h5:
             self._spike_writer.to_sonata(self._h5_fname, sort_order=self._sort_order, mode=self._mode)
-            pc.barrier()
+            #pc.barrier()
 
         if self._save_nwb:
             self._spike_writer.to_nwb(self._nwb_fname, sort_order=self._sort_order)
-            pc.barrier()
+            #pc.barrier()
 
         self._spike_writer.close()

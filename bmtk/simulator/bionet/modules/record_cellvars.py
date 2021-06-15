@@ -111,7 +111,11 @@ class MembraneReport(SimulatorMod):
         pass
 
     def initialize(self, sim):
-        self._var_recorder = MembraneRecorder(self._file_name, mode='w', variable=self._variables[0],
+        try:
+            self._var_recorder = MembraneRecorder(self._file_name, mode='w', variable=self._variables[0],
+                                              buffer_size=sim.nsteps_block, tstart=0.0, tstop=sim.tstop, dt=sim.dt)
+        except:
+            self._var_recorder = MembraneRecorder(self._file_name, mode='w', variable=list(self._transforms.keys())[0],
                                               buffer_size=sim.nsteps_block, tstart=0.0, tstop=sim.tstop, dt=sim.dt)
         self._gid_map = sim.net.gid_pool
 
@@ -151,7 +155,7 @@ class MembraneReport(SimulatorMod):
             for var_name, fnc in self._transforms.items():
                 seg_vals = [fnc(getattr(seg, var_name)) for seg in cell.get_segments()]
                 # self._var_recorder.record_cell(gid, var_name, seg_vals, tstep)
-                self._var_recorder.record_cell(pop_id.node_id, population=pop_id.population, val=seg_vals, tstep=tstep)
+                self._var_recorder.record_cell(pop_id.node_id, population=pop_id.population, vals=seg_vals, tstep=tstep)
 
         self._block_step += 1
 
@@ -174,39 +178,44 @@ class SomaReport(MembraneReport):
         super(SomaReport, self).__init__(tmp_dir=tmp_dir, file_name=file_name, variable_name=variable_name, cells=cells,
                                          sections=sections, buffer_data=buffer_data, transform=transform, **kwargs)
 
+        self.on = MPI_RANK == 0
+
     def initialize(self, sim):
-        self._var_recorder = MembraneRecorder(self._file_name, mode='w', variable=self._variables[0],
-                                              buffer_size=sim.nsteps_block, tstart=0.0, tstop=sim.tstop, dt=sim.dt)
-        self._gid_map = sim.net.gid_pool
+        if self.on:
+            self._var_recorder = MembraneRecorder(self._file_name, mode='w', variable=self._variables[0],
+                                                buffer_size=sim.nsteps_block, tstart=0.0, tstop=sim.tstop, dt=sim.dt)
+            self._gid_map = sim.net.gid_pool
 
-        self._get_gids(sim)
-        # self._save_sim_data(sim)
+            self._get_gids(sim)
+            # self._save_sim_data(sim)
 
-        for gid in self._local_gids:
-            pop_id = self._gid_map.get_pool_id(gid)
-            # self._var_recorder.add_cell(gid, [0], [0.5])
-            self._var_recorder.add_cell(pop_id.node_id, population=pop_id.population, element_ids=[0],
-                                        element_pos=[0.5])
+            for gid in self._local_gids:
+                pop_id = self._gid_map.get_pool_id(gid)
+                # self._var_recorder.add_cell(gid, [0], [0.5])
+                self._var_recorder.add_cell(pop_id.node_id, population=pop_id.population, element_ids=[0],
+                                            element_pos=[0.5])
 
-        # self._var_recorder.initialize(sim.n_steps, sim.nsteps_block)
-        self._var_recorder.initialize()
+            # self._var_recorder.initialize(sim.n_steps, sim.nsteps_block)
+            self._var_recorder.initialize()
 
     def step(self, sim, tstep, rel_time=0.0):
-        # save all necessary cells/variables at the current time-step into memory
-        for gid in self._local_gids:
-            pop_id = self._gid_map.get_pool_id(gid)
-            cell = sim.net.get_cell_gid(gid)
-            for var_name in self._variables:
-                var_val = getattr(cell.hobj.soma[0](0.5), var_name)
-                # self._var_recorder.record_cell(gid, var_name, [var_val], tstep)
-                self._var_recorder.record_cell(pop_id.node_id, population=pop_id.population, vals=[var_val],
-                                               tstep=tstep)
+        if self.on:
+            # save all necessary cells/variables at the current time-step into memory
+            for gid in self._local_gids:
+                pop_id = self._gid_map.get_pool_id(gid)
+                cell = sim.net.get_cell_gid(gid)
+                #import pdb; pdb.set_trace()
+                for var_name in self._variables:
+                    var_val = getattr(cell.hobj.soma[0](0.5), var_name)
+                    # self._var_recorder.record_cell(gid, var_name, [var_val], tstep)
+                    self._var_recorder.record_cell(pop_id.node_id, population=pop_id.population, vals=[var_val],
+                                                tstep=tstep)
 
-            for var_name, fnc in self._transforms.items():
-                var_val = getattr(cell.hobj.soma[0](0.5), var_name)
-                new_val = fnc(var_val)
-                # self._var_recorder.record_cell(gid, var_name, [new_val], tstep)
-                self._var_recorder.record_cell(pop_id.node_id, population=pop_id.population, vals=[new_val],
-                                               tstep=tstep)
+                for var_name, fnc in self._transforms.items():
+                    var_val = getattr(cell.hobj.soma[0](0.5), var_name)
+                    new_val = fnc(var_val)
+                    # self._var_recorder.record_cell(gid, var_name, [new_val], tstep)
+                    self._var_recorder.record_cell(pop_id.node_id, population=pop_id.population, vals=[new_val],
+                                                tstep=tstep)
 
-        self._block_step += 1
+            self._block_step += 1

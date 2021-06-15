@@ -141,24 +141,26 @@ class BioNetwork(SimNetwork):
             self._remote_node_cache[node_pop.name] = {}
             node_ids_map = {}
             if node_pop.internal_nodes_only:
-                for node in node_pop[MPI_rank::MPI_size]:
-                    cell = self._build_cell(bionode=node, population_name=node_pop.name)
-                    node_ids_map[node.node_id] = cell
-                    self._rank_node_gids[cell.gid] = cell
+                if MPI_rank >= 0:
+                    for node in node_pop[0::1]:
+                        cell = self._build_cell(bionode=node, population_name=node_pop.name)
+                        node_ids_map[node.node_id] = cell
+                        self._rank_node_gids[cell.gid] = cell
 
             elif node_pop.mixed_nodes:
                 # node population contains both internal and virtual (external) nodes and the virtual nodes must be
                 # filtered out
                 self._virtual_nodes[node_pop.name] = {}
-                for node in node_pop[MPI_rank::MPI_size]:
-                    if node.model_type == 'virtual':
-                        continue
-                    else:
-                        cell = self._build_cell(bionode=node, population_name=node_pop.name)
-                        node_ids_map[node.node_id] = cell
+                if MPI_rank >= 0:
+                    for node in node_pop[0::1]:
+                        if node.model_type == 'virtual':
+                            continue
+                        else:
+                            cell = self._build_cell(bionode=node, population_name=node_pop.name)
+                            node_ids_map[node.node_id] = cell
 
 
-                        self._rank_node_gids[cell.gid] = cell
+                            self._rank_node_gids[cell.gid] = cell
 
             elif node_pop.virtual_nodes_only:
                 self._virtual_nodes[node_pop.name] = {}

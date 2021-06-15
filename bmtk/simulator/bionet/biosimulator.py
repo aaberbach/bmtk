@@ -36,7 +36,8 @@ import h5py
 
 
 pc = h.ParallelContext()    # object to access MPI methods
-
+MPI_RANK = int(pc.id())
+N_HOSTS = int(pc.nhost())
 
 class BioSimulator(Simulator):
     """Includes methods to run and control the simulation"""
@@ -188,11 +189,12 @@ class BioSimulator(Simulator):
         h.celsius = self.celsius
                 
     def set_spikes_recording(self):
-        for gid, _ in self.net.get_local_cells().items():
-            tvec = self.h.Vector()
-            gidvec = self.h.Vector()
-            pc.spike_record(gid, tvec, gidvec)
-            self._spikes[gid] = tvec
+        if MPI_RANK == 0:
+            for gid, _ in self.net.get_local_cells().items():
+                tvec = self.h.Vector()
+                gidvec = self.h.Vector()
+                pc.spike_record(gid, tvec, gidvec)
+                self._spikes[gid] = tvec
 
     def attach_current_clamp(self, amplitude, delay, duration, gids=None):
 
@@ -313,18 +315,27 @@ class BioSimulator(Simulator):
         if beginning from a blank state, then will use h.run(),
         if continuing from the saved state, then will use h.continuerun() 
         """
-        for mod in self._sim_mods:
-            if isinstance(mod, mods.ClampReport):
-                if mod.variable == "se":
-                    mod.initialize(self, self._seclamps)
-                elif mod.variable == "ic":
-                    mod.initialize(self, self._iclamps)
-                elif mod.variable == "f_ic":
-                    mod.initialize(self, self._f_iclamps)
-            else:
-                mod.initialize(self)
+        print("BEFORE MODS")
+        io.log_info('Before mods')
+        if MPI_RANK == 0:
+            for mod in self._sim_mods:
+                if isinstance(mod, mods.ClampReport):
+                    if mod.variable == "se":
+                        mod.initialize(self, self._seclamps)
+                    elif mod.variable == "ic":
+                        mod.initialize(self, self._iclamps)
+                    elif mod.variable == "f_ic":
+                        mod.initialize(self, self._f_iclamps)
+                else:
+                    #import pdb; pdb.set_trace()
+                    io.log_info(str(mod))
+                    io.log_info("DURING MODS")
+                    mod.initialize(self)
 
+        io.log_info('Made it past mods')
+        print(MPI_RANK, "Made it past mods")
         self.start_time = h.startsw()
+        print(MPI_RANK, "Made it past h.startsw()")
         s_time = time.time()
         pc.timeout(0)
          
@@ -333,15 +344,65 @@ class BioSimulator(Simulator):
         io.log_info('Starting timestep: {} at t_sim: {:.3f} ms'.format(self.tstep, h.t))
         io.log_info('Block save every {} steps'.format(self.nsteps_block))
 
+        h.load_file("netparmpi.hoc")
+        pnm = h.ParallelNetManager(1)
+
+        # cells = self.net.get_local_cells()
+        # cell = cells[list(cells.keys())[0]]
+
+        #print(MPI_RANK, "BEFORE NC", str(cell.connections()[0]._connector.postseg()), flush=True)
+
+        if MPI_RANK >= 0:
+            cells = self.net.get_local_cells()
+            cell = cells[list(cells.keys())[0]]
+
+            #pnm.cells.append(cell.hobj)
+
+            # for con in cell.connections():
+            #     nc = con._connector
+            #     pnm.nclist.append(nc)
+
+            pnm.splitcell(1, 0, sec=cell.hobj.apic[1])
+            #import pdb; pdb.set_trace()
+            # cells = graph.get_local_cells()
+            # cell = cells[list(cells.keys())[0]]
+            # import pdb; pdb.set_trace()
+        # else:
+        #     pnm.splitcell(1, 0, sec=cell.hobj.apic[50])
+        #import pdb; pdb.set_trace()
+        #print(MPI_RANK, "AFTER NC", str(cell.connections()[0]._connector.postseg()), flush=True)
+        #cell.hobj.apic[70]
+        # if MPI_RANK == 1:
+        #     print(h.allobjects())
+        #     #print(list(h.L5PCtemplate[0].all))
+        #     print(list(pnm.cells))
+        #     print(list(pnm.cells.all))
+        #     #import pdb; pdb.set_trace()
+        #     #cell.hobj.soma[0]
+        #     #print(list(cell.hobj.all), flush=True)
+        pc.barrier()
+
+        # for con in cell.connections():
+        #     nc = con._connector
+        #     #nc.event(0)
+        #     if nc.valid() == 0:
+        #         nc.active()
+
+        print(MPI_RANK, "AFTER ACTIVATION", flush=True)
+
         if self._start_from_state:
             h.continuerun(h.tstop)
         else:
             h.run(h.tstop)        # <- runs simuation: works in parallel
-                    
+        
+        print(MPI_RANK, "Made it past h.run()", flush=True)
         pc.barrier()
+        if MPI_RANK == 0:
+            for mod in self._sim_mods:
+                print(str(mod), flush=True)
+                mod.finalize(self)
 
-        for mod in self._sim_mods:
-            mod.finalize(self)
+        print(MPI_RANK, "finalized mods", flush=True)
         pc.barrier()
 
         end_time = time.time()
@@ -364,18 +425,26 @@ class BioSimulator(Simulator):
         Called after every time step to perform computation and save data to memory block or to disk.
         The initial condition tstep=0 is not being saved 
         """
-        for mod in self._sim_mods:
-            mod.step(self, self.tstep)
-
+        print(MPI_RANK, self.tstep, flush=True)
+        #io.log_info("INSIDE POST_FADVANCE")
+        if MPI_RANK == 0:
+            for mod in self._sim_mods:
+                mod.step(self, self.tstep)
+        print(MPI_RANK, self.tstep, flush=True)
+        # if MPI_RANK == 0:
+        #     print(self.tstep, flush=True)
         self.tstep += 1
-
+        #io.log_info("INSIDE POST_FADVANCE 2")
         if (self.tstep % self.nsteps_block == 0) or self.tstep == self.nsteps:
+            #import pdb; pdb.set_trace()
             io.log_info('    step:{} t_sim:{:.2f} ms'.format(self.tstep, h.t))
             self.__tstep_end_block = self.tstep
             time_step_interval = (self.__tstep_start_block, self.__tstep_end_block)
-
-            for mod in self._sim_mods:
-                mod.block(self, time_step_interval)
+            print(MPI_RANK, "Made it past time_step_interval")
+            if MPI_RANK == 0:
+                for mod in self._sim_mods:
+                    print(MPI_RANK, str(mod))
+                    mod.block(self, time_step_interval)
 
             self.__tstep_start_block = self.tstep   # starting point for the next block
 
